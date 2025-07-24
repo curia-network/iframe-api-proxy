@@ -184,14 +184,30 @@ export class ApiProxyServer {
       try {
         const response = await fetch(url, requestOptions);
         clearTimeout(timeoutId);
-        return await this.processResponse(response);
+        
+        // 🎯 FIX: Handle different response formats based on endpoint
+        if (endpoint === '/api/communities' || endpoint === '/api/auth/validate-session') {
+          // These endpoints return raw NextJS responses - wrap in ApiResponse format
+          return await this.processRawApiResponse(response);
+        } else {
+          // Legacy plugin endpoints already return ApiResponse format
+          return await this.processResponse(response);
+        }
       } catch (error) {
         clearTimeout(timeoutId);
         throw error;
       }
     } else {
       const response = await fetch(url, requestOptions);
-      return await this.processResponse(response);
+      
+      // 🎯 FIX: Handle different response formats based on endpoint  
+      if (endpoint === '/api/communities' || endpoint === '/api/auth/validate-session') {
+        // These endpoints return raw NextJS responses - wrap in ApiResponse format
+        return await this.processRawApiResponse(response);
+      } else {
+        // Legacy plugin endpoints already return ApiResponse format
+        return await this.processResponse(response);
+      }
     }
   }
 
@@ -225,6 +241,42 @@ export class ApiProxyServer {
     }
 
     return data;
+  }
+
+  /**
+   * Process raw API response from NextJS endpoints and wrap in ApiResponse format
+   */
+  private async processRawApiResponse(response: Response): Promise<ApiResponse> {
+    if (!response.ok) {
+      throw createProxyError(
+        ProxyErrorType.NETWORK_ERROR,
+        `HTTP ${response.status}: ${response.statusText}`
+      );
+    }
+
+    let rawData: any;
+    try {
+      rawData = await response.json();
+    } catch (error) {
+      throw createProxyError(
+        ProxyErrorType.INVALID_RESPONSE,
+        'Invalid JSON response from API'
+      );
+    }
+
+    // Validate response structure
+    if (typeof rawData !== 'object' || rawData === null) {
+      throw createProxyError(
+        ProxyErrorType.INVALID_RESPONSE,
+        'Invalid response format from API'
+      );
+    }
+
+    // 🎯 CRITICAL FIX: Wrap raw data in ApiResponse format
+    return {
+      success: true,
+      data: rawData
+    };
   }
 
   /**

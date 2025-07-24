@@ -1,7 +1,7 @@
 {
   "name": "@curia_/iframe-api-proxy",
-  "version": "1.1.0",
-  "description": "API proxy system for iframe-based applications to bypass CSP restrictions",
+  "version": "1.1.1",
+  "description": "Cross-iframe API proxy for CSP-compliant communication",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
