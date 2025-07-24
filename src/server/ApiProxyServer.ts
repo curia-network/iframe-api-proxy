@@ -138,16 +138,44 @@ export class ApiProxyServer {
   private async makeApiRequest(endpoint: string, payload: ApiRequest): Promise<ApiResponse> {
     const url = `${this.config.baseUrl}${endpoint}`;
     
-    const requestOptions: RequestInit = {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...this.config.headers
-      },
-      body: JSON.stringify(payload)
-    };
+    // 🆕 NEW: Determine HTTP method and request format based on endpoint
+    let requestOptions: RequestInit;
+    
+    if (endpoint === '/api/communities') {
+      // GET request with Authorization header for communities
+      requestOptions = {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${payload.params?.sessionToken}`,
+          'Content-Type': 'application/json',
+          ...this.config.headers
+        }
+      };
+    } else if (endpoint === '/api/auth/validate-session') {
+      // POST request with sessionToken in body for profile
+      requestOptions = {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...this.config.headers
+        },
+        body: JSON.stringify({
+          sessionToken: payload.params?.sessionToken
+        })
+      };
+    } else {
+      // 🔄 EXISTING: Standard POST format for plugin methods
+      requestOptions = {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...this.config.headers
+        },
+        body: JSON.stringify(payload)
+      };
+    }
 
-    // Add timeout if supported
+    // 🔄 EXISTING: Timeout handling logic (unchanged)
     if (this.config.timeout > 0) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), this.config.timeout);

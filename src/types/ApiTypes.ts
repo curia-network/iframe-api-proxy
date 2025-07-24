@@ -32,7 +32,9 @@ export type ApiMethod =
   | 'getUserFriends'
   | 'getContextData'
   | 'getCommunityInfo'
-  | 'giveRole';
+  | 'giveRole'
+  | 'getUserCommunities'  // 🆕 NEW - For sidebar community list
+  | 'getUserProfile';     // 🆕 NEW - For sidebar user profile
 
 /**
  * API endpoint mapping
@@ -42,7 +44,9 @@ export const API_ENDPOINTS: Record<string, string> = {
   getUserFriends: '/api/user',
   getContextData: '/api/user',
   getCommunityInfo: '/api/community',
-  giveRole: '/api/community'
+  giveRole: '/api/community',
+  getUserCommunities: '/api/communities',        // 🆕 Maps to GET /api/communities
+  getUserProfile: '/api/auth/validate-session'   // 🆕 Maps to POST /api/auth/validate-session
 };
 
 /**
@@ -80,6 +84,23 @@ export interface GiveRoleRequest extends ApiRequest {
 }
 
 /**
+ * Authentication API method types
+ */
+export interface GetUserCommunitiesRequest extends ApiRequest {
+  method: 'getUserCommunities';
+  params?: { 
+    sessionToken: string;  // Required for authentication
+  };
+}
+
+export interface GetUserProfileRequest extends ApiRequest {
+  method: 'getUserProfile';
+  params?: { 
+    sessionToken: string;  // Required for authentication
+  };
+}
+
+/**
  * Union type for all API requests
  */
 export type ApiRequestUnion = 
@@ -87,7 +108,9 @@ export type ApiRequestUnion =
   | GetUserFriendsRequest
   | GetContextDataRequest
   | GetCommunityInfoRequest
-  | GiveRoleRequest;
+  | GiveRoleRequest
+  | GetUserCommunitiesRequest  // 🆕 NEW
+  | GetUserProfileRequest;     // 🆕 NEW
 
 /**
  * Helper function to get API endpoint for a method
