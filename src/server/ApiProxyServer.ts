@@ -51,6 +51,9 @@ export class ApiProxyServer {
     this.setupMessageListener();
     this.isInitialized = true;
     
+    // 🆕 Notify parent that API proxy is ready for requests
+    this.notifyParentReady();
+    
     if (this.config.debug) {
       console.log('[ApiProxyServer] Initialized with config:', {
         baseUrl: this.config.baseUrl,
@@ -58,6 +61,24 @@ export class ApiProxyServer {
         timeout: this.config.timeout,
         allowedOrigins: this.config.allowedOrigins
       });
+    }
+  }
+
+  /**
+   * Send ready notification to parent window
+   * This enables event-driven API proxy usage instead of polling/retries
+   */
+  private notifyParentReady(): void {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({
+        type: 'curia-api-proxy-ready',
+        serverId: this.config.serverId,
+        timestamp: new Date().toISOString()
+      }, '*');
+      
+      if (this.config.debug) {
+        console.log(`[ApiProxyServer] Ready notification sent to parent (serverId: ${this.config.serverId})`);
+      }
     }
   }
 
