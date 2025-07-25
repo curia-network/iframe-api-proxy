@@ -13,6 +13,7 @@ export interface ApiRequest {
   params?: Record<string, any>;
   userId: string;
   communityId: string;
+  signature?: string;
 }
 
 /**
