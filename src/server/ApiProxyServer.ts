@@ -5,11 +5,22 @@
  * from the customer page by making actual API calls to the host service.
  */
 
-import { ApiRequest, ApiResponse } from '../types/ApiTypes';
 import { 
-  ProxyApiRequestMessage,
-  isProxyApiRequest,
-  createProxyResponse
+  ApiRequest, 
+  ApiResponse,
+  ProxyRequest,
+  PluginRequest,
+  DirectApiRequest,
+  validateProxyRequest,
+  convertLegacyRequest
+} from '../types/ApiTypes';
+import { 
+  createProxyResponse,
+  EnhancedProxyRequestMessage,
+  LegacyProxyRequestMessage,
+  AnyProxyRequestMessage,
+  isAnyProxyRequest,
+  isUsingEnhancedFormat
 } from '../types/MessageTypes';
 import { 
   ProxyServerConfig, 
@@ -26,6 +37,33 @@ import {
  * 
  * Handles API proxy requests from the customer page by making
  * actual API calls to the host service and returning responses.
+ * 
+ * =============================================================================
+ * 🚀 ENHANCED ARCHITECTURE
+ * =============================================================================
+ * 
+ * The server now supports both legacy and new flexible request formats:
+ * 
+ * 📨 MESSAGE FORMATS:
+ * - Legacy: { type: 'proxy-api-request', endpoint: '/api/user', payload: ApiRequest }
+ * - Enhanced: { type: 'proxy-api-request', request: ProxyRequest }
+ * 
+ * 🔀 REQUEST TYPES:
+ * - Plugin Requests: Traditional method-based calls with endpoint mapping
+ * - Direct Requests: Full HTTP control (method, headers, body, URL)
+ * 
+ * 🛠️ PROCESSING FLOW:
+ * 1. handleAnyProxyRequest() - Detects message format (legacy vs enhanced)
+ * 2. processProxyRequest() - Routes to plugin or direct processing
+ * 3. processPluginRequest() - Uses endpoint mapping + legacy makeApiRequest()
+ * 4. processDirectRequest() - Full HTTP control via makeDirectHttpRequest()
+ * 
+ * 🔄 BACKWARD COMPATIBILITY:
+ * - All existing legacy requests continue to work unchanged
+ * - Legacy format automatically converted to enhanced format internally
+ * - No breaking changes to current plugin usage
+ * 
+ * =============================================================================
  */
 export class ApiProxyServer {
   private config: Required<ProxyServerConfig>;
@@ -105,35 +143,64 @@ export class ApiProxyServer {
         return;
       }
 
-      // Handle proxy API requests
-      if (isProxyApiRequest(event.data)) {
-        this.handleProxyRequest(event.data, event.source as Window);
+      // Handle proxy API requests (both legacy and enhanced formats)
+      if (isAnyProxyRequest(event.data)) {
+        this.handleAnyProxyRequest(event.data, event.source as Window);
       }
     };
 
     window.addEventListener('message', this.messageListener);
   }
 
+
+
+  // =============================================================================
+  // 🚀 NEW: Enhanced Request Handler for Flexible Request System
+  // =============================================================================
+
   /**
-   * Handle incoming proxy API request
+   * Handle incoming proxy API request (both legacy and enhanced formats)
    */
-  private async handleProxyRequest(message: ProxyApiRequestMessage, source: Window): Promise<void> {
+  private async handleAnyProxyRequest(message: AnyProxyRequestMessage, source: Window): Promise<void> {
     this.requestCount++;
     this.lastRequestTime = Date.now();
 
-    if (this.config.debug) {
-      console.log('[ApiProxyServer] Received proxy request:', {
-        requestId: message.requestId,
-        endpoint: message.endpoint,
-        method: message.payload.method,
-        userId: message.payload.userId,
-        communityId: message.payload.communityId
-      });
-    }
-
     try {
-      // Make API request to host service
-      const response = await this.makeApiRequest(message.endpoint, message.payload);
+      let response: any;
+
+      if (isUsingEnhancedFormat(message)) {
+        // Enhanced format: process ProxyRequest directly
+        const enhancedMessage = message as EnhancedProxyRequestMessage;
+        
+        if (this.config.debug) {
+          console.log('[ApiProxyServer] Received enhanced proxy request:', {
+            requestId: enhancedMessage.requestId,
+            type: enhancedMessage.request.type,
+            ...(enhancedMessage.request.type === 'plugin' 
+              ? { method: enhancedMessage.request.method } 
+              : { url: enhancedMessage.request.url, method: enhancedMessage.request.method })
+          });
+        }
+
+        response = await this.processProxyRequest(enhancedMessage.request);
+      } else {
+        // Legacy format: convert and process
+        const legacyMessage = message as LegacyProxyRequestMessage;
+        
+        if (this.config.debug) {
+          console.log('[ApiProxyServer] Received legacy proxy request:', {
+            requestId: legacyMessage.requestId,
+            endpoint: legacyMessage.endpoint,
+            method: legacyMessage.payload.method,
+            userId: legacyMessage.payload.userId,
+            communityId: legacyMessage.payload.communityId
+          });
+        }
+
+        // Convert legacy format to enhanced format
+        const pluginRequest = convertLegacyRequest(legacyMessage.payload);
+        response = await this.processProxyRequest(pluginRequest);
+      }
       
       // Send successful response back to client
       this.sendSuccessResponse(source, message.requestId, response);
@@ -150,6 +217,157 @@ export class ApiProxyServer {
       
       // Send error response back to client
       this.sendErrorResponse(source, message.requestId, error);
+    }
+  }
+
+  /**
+   * Process a proxy request (either plugin or direct API request)
+   */
+  private async processProxyRequest(request: ProxyRequest): Promise<any> {
+    if (!validateProxyRequest(request)) {
+      throw createProxyError(
+        ProxyErrorType.INVALID_REQUEST,
+        'Invalid proxy request format'
+      );
+    }
+
+    if (request.type === 'plugin') {
+      return this.processPluginRequest(request);
+    } else if (request.type === 'direct') {
+      return this.processDirectRequest(request);
+    } else {
+      throw createProxyError(
+        ProxyErrorType.INVALID_REQUEST,
+        `Unknown request type: ${(request as any).type}`
+      );
+    }
+  }
+
+  /**
+   * Process a plugin-style request using the endpoint mapping
+   */
+  private async processPluginRequest(request: PluginRequest): Promise<ApiResponse> {
+    // Use existing endpoint mapping logic for plugin requests
+    const endpoint = this.getEndpointForPluginMethod(request.method);
+    
+    // Convert back to legacy format for compatibility with existing makeApiRequest
+    const legacyRequest: ApiRequest = {
+      method: request.method,
+      userId: request.userId,
+      communityId: request.communityId
+    };
+    
+    // Only include optional properties if they're defined
+    if (request.params !== undefined) {
+      legacyRequest.params = request.params;
+    }
+    if (request.signature !== undefined) {
+      legacyRequest.signature = request.signature;
+    }
+    
+    return this.makeApiRequest(endpoint, legacyRequest);
+  }
+
+  /**
+   * Process a direct HTTP API request
+   */
+  private async processDirectRequest(request: DirectApiRequest): Promise<ApiResponse> {
+    const rawData = await this.makeDirectHttpRequest(request);
+    
+    // 🚀 FIX: Wrap direct HTTP response in ApiResponse format for client compatibility
+    return {
+      success: true,
+      data: rawData
+    };
+  }
+
+  /**
+   * Get endpoint for plugin method (extracted from existing logic)
+   */
+  private getEndpointForPluginMethod(method: string): string {
+    const methodToEndpoint: Record<string, string> = {
+      'getUserInfo': '/api/user',
+      'getUserFriends': '/api/user',
+      'getContextData': '/api/user',
+      'getCommunityInfo': '/api/community',
+      'giveRole': '/api/community',
+      'getUserCommunities': '/api/communities',
+      'getUserProfile': '/api/auth/validate-session'
+    };
+    
+    const endpoint = methodToEndpoint[method];
+    if (!endpoint) {
+      throw createProxyError(
+        ProxyErrorType.INVALID_REQUEST,
+        `Unknown plugin method: ${method}`
+      );
+    }
+    
+    return endpoint;
+  }
+
+  /**
+   * Make a direct HTTP request with full control over method, headers, and body
+   */
+  private async makeDirectHttpRequest(request: DirectApiRequest): Promise<any> {
+    const url = request.url.startsWith('http') 
+      ? request.url 
+      : `${this.config.baseUrl}${request.url}`;
+    
+    const requestOptions: RequestInit = {
+      method: request.method || 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...this.config.headers,
+        ...request.headers
+      }
+    };
+    
+    // Add body for non-GET requests
+    if (request.body && requestOptions.method !== 'GET') {
+      requestOptions.body = typeof request.body === 'string' 
+        ? request.body 
+        : JSON.stringify(request.body);
+    }
+    
+    // Handle timeout if specified
+    const timeout = request.timeout || this.config.timeout;
+    if (timeout > 0) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
+      requestOptions.signal = controller.signal;
+      
+      try {
+        const response = await fetch(url, requestOptions);
+        clearTimeout(timeoutId);
+        return await this.processDirectHttpResponse(response);
+      } catch (error) {
+        clearTimeout(timeoutId);
+        throw error;
+      }
+    } else {
+      const response = await fetch(url, requestOptions);
+      return await this.processDirectHttpResponse(response);
+    }
+  }
+
+  /**
+   * Process response from direct HTTP request
+   */
+  private async processDirectHttpResponse(response: Response): Promise<any> {
+    if (!response.ok) {
+      throw createProxyError(
+        ProxyErrorType.NETWORK_ERROR,
+        `HTTP ${response.status}: ${response.statusText}`
+      );
+    }
+
+    // Try to parse as JSON, fall back to text
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      return await response.json();
+    } else {
+      return await response.text();
     }
   }
 

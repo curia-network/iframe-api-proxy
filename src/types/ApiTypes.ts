@@ -6,7 +6,7 @@
  */
 
 /**
- * Base API request interface
+ * Base API request interface (legacy - kept for backward compatibility)
  */
 export interface ApiRequest {
   method: string;
@@ -24,6 +24,53 @@ export interface ApiResponse<T = any> {
   data?: T;
   error?: string;
 }
+
+// =============================================================================
+// 🚀 NEW: Flexible Request System
+// =============================================================================
+
+/**
+ * Plugin-style request (similar to legacy ApiRequest but more explicit)
+ */
+export interface PluginRequest {
+  type: 'plugin';
+  method: string;
+  params?: Record<string, any>;
+  userId: string;
+  communityId: string;
+  signature?: string;
+}
+
+/**
+ * Direct HTTP API request for any endpoint
+ */
+export interface DirectApiRequest {
+  type: 'direct';
+  url: string;
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
+  headers?: Record<string, string>;
+  body?: any;
+  timeout?: number;
+}
+
+/**
+ * Union type for all proxy request types
+ */
+export type ProxyRequest = PluginRequest | DirectApiRequest;
+
+/**
+ * Options for convenience request methods
+ */
+export interface RequestOptions {
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
+  headers?: Record<string, string>;
+  body?: any;
+  timeout?: number;
+}
+
+// =============================================================================
+// 🔄 EXISTING: Legacy Plugin API Types (unchanged for compatibility)
+// =============================================================================
 
 /**
  * API method types that can be proxied
@@ -134,4 +181,73 @@ export function validateApiRequest(request: ApiRequest): request is ApiRequestUn
     request.communityId &&
     API_ENDPOINTS[request.method]
   );
+} 
+
+// =============================================================================
+// 🚀 NEW: Validation Functions for Flexible Request System
+// =============================================================================
+
+/**
+ * Validate plugin-style request
+ */
+export function validatePluginRequest(request: any): request is PluginRequest {
+  return !!(
+    request &&
+    request.type === 'plugin' &&
+    request.method &&
+    request.userId &&
+    request.communityId &&
+    API_ENDPOINTS[request.method]
+  );
+}
+
+/**
+ * Validate direct API request
+ */
+export function validateDirectApiRequest(request: any): request is DirectApiRequest {
+  return !!(
+    request &&
+    request.type === 'direct' &&
+    request.url &&
+    typeof request.url === 'string'
+  );
+}
+
+/**
+ * Validate any proxy request type
+ */
+export function validateProxyRequest(request: any): request is ProxyRequest {
+  if (!request || typeof request !== 'object') {
+    return false;
+  }
+  
+  if (request.type === 'plugin') {
+    return validatePluginRequest(request);
+  } else if (request.type === 'direct') {
+    return validateDirectApiRequest(request);
+  }
+  
+  return false;
+}
+
+/**
+ * Convert legacy ApiRequest to PluginRequest
+ */
+export function convertLegacyRequest(legacyRequest: ApiRequest): PluginRequest {
+  const converted: PluginRequest = {
+    type: 'plugin',
+    method: legacyRequest.method,
+    userId: legacyRequest.userId,
+    communityId: legacyRequest.communityId
+  };
+  
+  // Only include optional properties if they're defined
+  if (legacyRequest.params !== undefined) {
+    converted.params = legacyRequest.params;
+  }
+  if (legacyRequest.signature !== undefined) {
+    converted.signature = legacyRequest.signature;
+  }
+  
+  return converted;
 } 

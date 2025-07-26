@@ -7,7 +7,13 @@
  * - Forum iframe (forum application)
  */
 
-import { ApiRequest, ApiResponse } from './ApiTypes';
+import { 
+  ApiRequest, 
+  ApiResponse,
+  ProxyRequest,
+  PluginRequest,
+  DirectApiRequest
+} from './ApiTypes';
 
 /**
  * Message types used in the proxy system
@@ -58,6 +64,33 @@ export interface ProxyApiRequestMessage extends BaseMessage {
   endpoint: string;
   payload: ApiRequest;
 }
+
+// =============================================================================
+// 🚀 NEW: Enhanced Proxy Request Messages for Flexible Request System
+// =============================================================================
+
+/**
+ * Enhanced proxy request message that supports both plugin and direct API requests
+ */
+export interface EnhancedProxyRequestMessage extends BaseMessage {
+  type: MessageType.PROXY_API_REQUEST;
+  request: ProxyRequest;  // Can be either PluginRequest or DirectApiRequest
+}
+
+/**
+ * Legacy proxy request message (for backward compatibility)
+ * This is the same as ProxyApiRequestMessage but with explicit naming
+ */
+export interface LegacyProxyRequestMessage extends BaseMessage {
+  type: MessageType.PROXY_API_REQUEST;
+  endpoint: string;
+  payload: ApiRequest;
+}
+
+/**
+ * Union type for all proxy request message formats
+ */
+export type AnyProxyRequestMessage = EnhancedProxyRequestMessage | LegacyProxyRequestMessage;
 
 /**
  * Message from active iframe to InternalPluginHost
@@ -110,6 +143,7 @@ export interface ProxyReadyMessage extends BaseMessage {
 export type ProxyMessage = 
   | ForumApiRequestMessage
   | ProxyApiRequestMessage
+  | EnhancedProxyRequestMessage
   | ProxyApiResponseMessage
   | ForumApiResponseMessage
   | ProxyErrorMessage
@@ -143,6 +177,45 @@ export function isProxyError(message: any): message is ProxyErrorMessage {
   return message?.type === MessageType.PROXY_ERROR && 
          message?.requestId && 
          message?.error;
+}
+
+// =============================================================================
+// 🚀 NEW: Enhanced Type Guards for Flexible Request System
+// =============================================================================
+
+/**
+ * Type guard for enhanced proxy request messages
+ */
+export function isEnhancedProxyRequest(message: any): message is EnhancedProxyRequestMessage {
+  return message?.type === MessageType.PROXY_API_REQUEST && 
+         message?.requestId && 
+         message?.request &&
+         (message.request.type === 'plugin' || message.request.type === 'direct');
+}
+
+/**
+ * Type guard for legacy proxy request messages
+ */
+export function isLegacyProxyRequest(message: any): message is LegacyProxyRequestMessage {
+  return message?.type === MessageType.PROXY_API_REQUEST && 
+         message?.requestId && 
+         message?.endpoint && 
+         message?.payload &&
+         !message?.request; // Distinguish from enhanced format
+}
+
+/**
+ * Type guard that handles both legacy and enhanced proxy requests
+ */
+export function isAnyProxyRequest(message: any): message is AnyProxyRequestMessage {
+  return isEnhancedProxyRequest(message) || isLegacyProxyRequest(message);
+}
+
+/**
+ * Helper to determine if a proxy request message is using the enhanced format
+ */
+export function isUsingEnhancedFormat(message: AnyProxyRequestMessage): message is EnhancedProxyRequestMessage {
+  return 'request' in message && !!message.request;
 }
 
 /**
@@ -193,4 +266,72 @@ export function createProxyResponse(requestId: string, response: ApiResponse): P
     response,
     timestamp: Date.now()
   };
+} 
+
+// =============================================================================
+// 🚀 NEW: Enhanced Helper Functions for Flexible Request System
+// =============================================================================
+
+/**
+ * Helper function to create enhanced proxy request message
+ */
+export function createEnhancedProxyRequest(requestId: string, request: ProxyRequest): EnhancedProxyRequestMessage {
+  return {
+    type: MessageType.PROXY_API_REQUEST,
+    requestId,
+    request,
+    timestamp: Date.now()
+  };
+}
+
+/**
+ * Helper function to create direct API request message
+ */
+export function createDirectApiRequest(
+  requestId: string, 
+  url: string, 
+  options?: {
+    method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
+    headers?: Record<string, string>;
+    body?: any;
+    timeout?: number;
+  }
+): EnhancedProxyRequestMessage {
+  const directRequest: DirectApiRequest = {
+    type: 'direct',
+    url,
+    method: options?.method || 'GET',
+    ...options
+  };
+  
+  return createEnhancedProxyRequest(requestId, directRequest);
+}
+
+/**
+ * Helper function to create plugin-style request message  
+ */
+export function createPluginRequest(
+  requestId: string,
+  method: string,
+  userId: string,
+  communityId: string,
+  params?: Record<string, any>,
+  signature?: string
+): EnhancedProxyRequestMessage {
+  const pluginRequest: PluginRequest = {
+    type: 'plugin',
+    method,
+    userId,
+    communityId
+  };
+  
+  // Only include optional properties if they're defined
+  if (params !== undefined) {
+    pluginRequest.params = params;
+  }
+  if (signature !== undefined) {
+    pluginRequest.signature = signature;
+  }
+  
+  return createEnhancedProxyRequest(requestId, pluginRequest);
 } 
